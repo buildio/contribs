@@ -1,0 +1,65 @@
+From 0031d4886858c14460abc3f44d1d6165c2104277 Mon Sep 17 00:00:00 2001
+From: Kir Kolyshkin <kolyshkin@gmail.com>
+Date: Wed, 21 Oct 2026 13:18:09 -0700
+Subject: [PATCH 1/2] linux: treat ENOENT/EINVAL from pidfd_open as ESRCH
+
+pidfd_open(2) with flags=0 fails if the pid is not a thread-group
+leader. Older kernels report this as EINVAL (also used when the task
+is being reaped), while Linux >= 6.16 reports ESRCH for a reaped task
+and ENOENT for a pid which is not a thread-group leader (see kernel
+commits 8cf4b738f6d8 and 17f1b08acf50).
+
+The container init process is a thread-group leader, and it can't
+lose this status while alive, so both errors mean the process is gone
+and its pid number was either reused by a thread of another process,
+or is being released.
+
+Currently, EINVAL is handled by re-checking the pid validity, which is
+redundant, and ENOENT is not handled at all, resulting in an
+"open pidfd: No such file or directory" error on newer kernels.
+
+Map both EINVAL and ENOENT to ESRCH.
+
+Assisted-by: Claude Code (claude-opus-5-5)
+Signed-off-by: Kir Kolyshkin <kolyshkin@gmail.com>
+---
+ src/libcrun/linux.c | 23 ++++-------------------
+ 1 file changed, 4 insertions(+), 19 deletions(-)
+
+diff --git a/src/libcrun/linux.c b/src/libcrun/linux.c
+index eeb4c522..7d05f0b1 100644
+--- a/src/libcrun/linux.c
++++ b/src/libcrun/linux.c
+@@ -7398,25 +7398,10 @@ libcrun_kill_linux (libcrun_container_status_t *status, int signal, libcrun_erro
+       /* If pidfd_open is not supported, fallback to kill.  */
+       if (errno == ENOSYS)
+         return libcrun_kill_linux_no_pidfd (status, true, signal, err);
+-      if (errno == ESRCH)
+-        return crun_make_error (err, errno, "process not running");
+-      /* Check if the PID is valid before reporting an error. */
+-      if (errno == EINVAL)
+-        {
+-          int errno_saved = errno;
+-          ret = libcrun_check_pid_valid (status, err);
+-          if (UNLIKELY (ret < 0))
+-            return ret;
+-          if (ret == 0)
+-            {
+-              errno = ESRCH;
+-              return crun_make_error (err, errno, "kill process");
+-            }
+-
+-          /* Restore original errno. */
+-          errno = errno_saved;
+-        }
+-
++      /* Kernels < 6.16 return EINVAL, newer ones ENOENT, when the pid
++         is not a thread-group leader (i.e. it was reused).  */
++      if (errno == ESRCH || errno == ENOENT || errno == EINVAL)
++        return crun_make_error (err, ESRCH, "process not running");
+       return crun_make_error (err, errno, "open pidfd");
+     }
+ 
+-- 
+2.52.0
+
