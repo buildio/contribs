@@ -77,6 +77,10 @@ Five packages come out:
 `/boot/vmlinuz-7.0.0-42-generic` inside the image package:
 `2a7ee31b2abb4ef4e517d2e10a4eb5b39d81f94b8967eb7ccf4fbd248fca09e0`.
 
+Published as the `linux-hwe-7.0-7.0.0-42-cve98432` release. GitHub rewrites `~` to `.` in
+asset filenames, so a downloaded file's name differs from the name in `SHA256SUMS` while the
+bytes are identical. Compare hash values rather than running `sha256sum -c`.
+
 ### What is deliberately missing
 
 Stock -38 on these nodes also carries `linux-tools-*`, `linux-main-modules-zfs-*` and
